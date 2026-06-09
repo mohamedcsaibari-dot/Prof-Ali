@@ -1064,11 +1064,11 @@ Texte pur numéroté uniquement. Pas de HTML ni markdown."""
 
 # ═══════════════════ ENVOI EMAIL ══════════════════════════════════
 def send_email(day,pdf_bytes):
-    now=datetime.now(MOROCCO).strftime("%d/%m/%Y") if MOROCCO else "—"
-    fname=f"Prof_Jour_{day:03d}_{now.replace('/','')}.pdf"
-    subj=f"🎓 Leçon Jour {day}/200 · {now} · EN+ES+AR+Maths+Logique"
-    sz=len(pdf_bytes)//1024
-    body=f"""<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;background:#f0f4ff;padding:20px;border-radius:16px">
+    now  = datetime.now(MOROCCO).strftime("%d/%m/%Y") if MOROCCO else "—"
+    fname= f"Prof_Jour_{day:03d}_{now.replace('/','')}.pdf"
+    subj = f"🎓 Leçon Jour {day}/200 · {now} · EN+ES+AR+Maths+Logique"
+    sz   = len(pdf_bytes)//1024
+    body = f"""<div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;background:#f0f4ff;padding:20px;border-radius:16px">
 <div style="background:linear-gradient(135deg,#3730a3,#6d28d9);border-radius:12px;padding:24px;text-align:center;color:white">
 <div style="font-size:48px">🎓</div><h1 style="margin:8px 0;font-size:24px">Professeur du Jour</h1>
 <p>Jour {day}/200 · {now}</p>
@@ -1082,31 +1082,54 @@ def send_email(day,pdf_bytes):
 <td style="background:#fce7f3;border-radius:8px;padding:8px;text-align:center;font-size:12px;font-weight:bold">🇪🇸 Espagnol<br>20 min</td>
 <td style="background:#f3e5f5;border-radius:8px;padding:8px;text-align:center;font-size:12px;font-weight:bold">🌙 Arabe<br>15 min</td>
 </tr></table></div>
-<p style="text-align:center;color:#6b7280;font-size:11px;margin-top:12px">🤖 Professeur Agent v5 · Envoi automatique 19h00 Maroc</p></div>"""
-    if GMAIL_USER and GMAIL_PASS:
-        try:
-            msg=MIMEMultipart("mixed")
-            msg["From"]=f"Prof de Sami <{GMAIL_USER}>"; msg["To"]=EMAIL_TO; msg["Subject"]=subj
-            msg.attach(MIMEText(body,"html"))
-            p=MIMEBase("application","pdf"); p.set_payload(pdf_bytes)
-            encoders.encode_base64(p)
-            p.add_header("Content-Disposition",f'attachment; filename="{fname}"')
-            msg.attach(p)
-            with smtplib.SMTP_SSL("smtp.gmail.com",465,timeout=30) as s:
-                s.login(GMAIL_USER,GMAIL_PASS); s.send_message(msg)
-            log.info(f"✅ Gmail → {EMAIL_TO}"); return True
-        except Exception as e: log.error(f"Gmail: {e}")
+<p style="text-align:center;color:#6b7280;font-size:11px;margin-top:12px">🤖 Professeur Agent v5 · 19h00 Maroc</p></div>"""
+
+    import base64
+
+    # ── MÉTHODE 1 : Resend API HTTP (même que Baraka — jamais bloqué) ─────────
     if RESEND_KEY:
         try:
-            import resend as rs; rs.api_key=RESEND_KEY
-            rs.Emails.send({"from":EMAIL_FROM,"to":[EMAIL_TO],"subject":subj,"html":body,
-                "attachments":[{"filename":fname,"content":list(pdf_bytes)}]})
-            log.info(f"✅ Resend → {EMAIL_TO}"); return True
-        except Exception as e: log.error(f"Resend: {e}")
-    log.error("⚠️  Aucun fournisseur email (GMAIL ou RESEND)"); return False
+            pdf_b64 = base64.b64encode(pdf_bytes).decode()
+            frm = EMAIL_FROM if EMAIL_FROM != "professeur@baraka-bvc.com" else "onboarding@resend.dev"
+            r = _req.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_KEY}", "Content-Type": "application/json"},
+                json={"from": f"Prof de Sami <{frm}>",
+                      "to": [EMAIL_TO],
+                      "subject": subj,
+                      "html": body,
+                      "attachments": [{"filename": fname, "content": pdf_b64}]},
+                timeout=30,
+            )
+            if r.status_code in [200, 201]:
+                log.info(f"✅ Resend OK → {EMAIL_TO}"); return True
+            else:
+                log.error(f"Resend {r.status_code}: {r.text[:100]}")
+        except Exception as e:
+            log.error(f"Resend: {e}")
+
+    # ── MÉTHODE 2 : Gmail SMTP port 587 (STARTTLS) ────────────────────────────
+    if GMAIL_USER and GMAIL_PASS:
+        try:
+            msg = MIMEMultipart("mixed")
+            msg["From"]    = f"Prof de Sami <{GMAIL_USER}>"
+            msg["To"]      = EMAIL_TO
+            msg["Subject"] = subj
+            msg.attach(MIMEText(body, "html"))
+            p = MIMEBase("application", "pdf"); p.set_payload(pdf_bytes)
+            encoders.encode_base64(p)
+            p.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+            msg.attach(p)
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
+                s.ehlo(); s.starttls(); s.login(GMAIL_USER, GMAIL_PASS)
+                s.send_message(msg)
+            log.info(f"✅ Gmail SMTP → {EMAIL_TO}"); return True
+        except Exception as e:
+            log.error(f"Gmail: {e}")
+
+    log.error("⚠️  Aucun fournisseur email configuré"); return False
 
 
-# ═══════════════════ SCHEDULER + MAIN ════════════════════════════
 def run_daily():
     day=tday()
     if day is None: log.info(f"Programme non actif (début={START_DATE})"); return
