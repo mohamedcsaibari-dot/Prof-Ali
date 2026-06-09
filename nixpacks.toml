@@ -1,7 +1,6 @@
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311Full", "fonts-noto-color-emoji"]
 aptPkgs = [
-  "fonts-noto-color-emoji",
   "fonts-dejavu",
   "fonts-kacst",
   "fonts-kacst-one"
